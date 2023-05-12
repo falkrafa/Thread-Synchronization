@@ -1,4 +1,3 @@
-#include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -6,76 +5,83 @@
 
 #include "copy.c"
 
-int retornoCont = 0;
-pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
+int counter = 0;
 
 void *passageiros_thread(void *arg)
 {
-    struct estacao *estacao = (struct estacao *)arg;
-    estacao_espera_pelo_vagao(estacao);
+  struct estacao *estacao = (struct estacao *) arg;
+	estacao_espera_pelo_vagao(estacao);
 
-    pthread_mutex_lock(&mutex);
-    retornoCont++;
-    pthread_mutex_unlock(&mutex);
-    // printf("RETORNOU!, valor compartilhado: %d\n", retornoCont);
-
-    return NULL;
+   __atomic_fetch_add(&counter, 1, __ATOMIC_SEQ_CST);
+  
+	return NULL;
 }
 
-struct vagao_args
-{
-    struct estacao *estacao;
-    int assentos_livres;
+struct vagao_args {
+	struct estacao *estacao;
+	int assentos_livres;
 };
 
 void *vagao_thread(void *args)
 {
-    struct vagao_args *vargs = (struct vagao_args *)args;
-    estacao_preecher_vagao(vargs->estacao, vargs->assentos_livres);
-    return NULL;
+	struct vagao_args *vargs = (struct vagao_args *) args;
+	estacao_preencher_vagao(vargs->estacao, vargs->assentos_livres);
+	return NULL;
 }
 
-void run_test(int num_passageiros, int num_assentos)
-{
-    struct estacao estacao;
-    estacao_init(&estacao);
+int run_test(int numPassageiros, int numAssentos){
 
-    pthread_t passageiros[num_passageiros];
+  struct estacao estacao;
+  estacao_init(&estacao);
 
-    for (int i = 0; i < num_passageiros; i++)
-    {
-        pthread_create(&passageiros[i], NULL, passageiros_thread, &estacao);
+  int passageiro = numPassageiros;
+
+  pthread_t passageiros[numPassageiros];
+
+  for(int i = 0; i < numPassageiros; i++){
+    //printf("Passageiro %d chegou\n", i+1);
+    pthread_create(&passageiros[i], NULL, (void *)passageiros_thread, (void *)&estacao);
+  }     
+    sleep(1);
+
+  struct vagao_args vargs;
+  vargs.estacao = &estacao;  
+  vargs.assentos_livres = numAssentos;
+  
+  while(passageiro > 0){
+    int assentos = numAssentos;
+
+    pthread_t vagao;
+    pthread_create(&vagao, NULL, (void *)vagao_thread, (void *)&vargs);
+    //printf("Vagão %d chegou na estação\n", repCount++);
+
+    int reap;
+    if(passageiro < assentos){
+      reap = passageiro;
+    }else {
+      reap = assentos;
     }
-
-    while (num_passageiros > 0)
-    {
-        struct vagao_args vargs;
-        vargs.estacao = &estacao;
-        vargs.assentos_livres = num_assentos;
-
-        pthread_t vagao;
-        pthread_create(&vagao, NULL, vagao_thread, &vargs);
-
-        int numPassengersReap = (num_passageiros > num_assentos) ? num_assentos : num_passageiros;
-        num_passageiros -= numPassengersReap;
-
-        for (int i = 0; i < numPassengersReap; i++)
-        {
-            while (retornoCont != numPassengersReap)
-                ;
-            // aguarda o retorno das threads de passageiros
+    while(reap != 0){
+        if (counter > 0){
             estacao_embarque(&estacao);
+            __atomic_fetch_add(&counter, -1, __ATOMIC_SEQ_CST);
+            passageiro--;
+            assentos--;
+            reap--;
         }
-
-        pthread_mutex_lock(&mutex);
-        retornoCont = 0;
-        pthread_mutex_unlock(&mutex);
     }
+    if (counter != 0){
+      printf("%d\n",counter);
+      printf("Deu Ruim irmão, tente novamente.\n");
+      exit(0);
+    } 
+    printf("Vagão saiu da estação\n");
+    }
+    printf("Estação finalizada\n");
+  return 0;
 }
 
-int main(void)
-{
-    run_test(30, 30);
-    // passageiros, assentos
-    return 0;
+int main(void){
+  run_test(51, 50);
+
 }

@@ -20,20 +20,23 @@ void estacao_init(struct estacao *estacao) {
     printf("Estação inicializada.\n");
 }
 
-void estacao_preecher_vagao(struct estacao *estacao, int assentos) {
+void estacao_preencher_vagao(struct estacao *estacao, int assentos) {
     pthread_mutex_lock(&estacao->mutex);
-    estacao->assentos_livres = assentos;
-    printf("vagao chegou\n");
+    printf("Vagão chegou à estação, com %d assentos livres\n", assentos);
     pthread_cond_broadcast(&estacao->vagao_disponivel);
+    estacao->assentos_livres = assentos;
+    estacao->passageiros_embarcados = 0;
 
-    while (estacao->passageiros_embarcados < estacao->assentos_livres ) {
+    while (estacao->assentos_livres > 0 && estacao->passageiros_embarcados < estacao->assentos_livres) {
         pthread_cond_wait(&estacao->embarque_concluido, &estacao->mutex);
-        estacao->assentos_livres--;
-        estacao->passageiros_embarcados++;
     }
+
+    printf("Vagão saiu da estação\n");
+    estacao->assentos_livres = 0;
 
     pthread_mutex_unlock(&estacao->mutex);
 }
+
 
 
 void estacao_espera_pelo_vagao(struct estacao *estacao) {
@@ -42,9 +45,11 @@ void estacao_espera_pelo_vagao(struct estacao *estacao) {
     printf("Passageiro %d criado.\n", estacao->passageiros_esperando);
     estacao->passageiros_esperando++;
 
-    while (estacao->assentos_livres == 0 || estacao->passageiros_embarcados == estacao->assentos_livres) {
+    while (estacao->assentos_livres == 0 || estacao->passageiros_embarcados >= estacao->assentos_livres) {
         pthread_cond_wait(&estacao->vagao_disponivel, &estacao->mutex);
     }
+
+    // printf("Passageiro saiu de espera\n");
 
     estacao->passageiros_esperando--;
     estacao->passageiros_embarcados++;
@@ -55,11 +60,6 @@ void estacao_espera_pelo_vagao(struct estacao *estacao) {
 void estacao_embarque(struct estacao *estacao) {
     pthread_mutex_lock(&estacao->mutex);
     printf("Passageiro embarcando.\n");
-    if (estacao->passageiros_embarcados == estacao->assentos_livres) {
-        pthread_cond_broadcast(&estacao->embarque_concluido);
-    }
-    else{
-        pthread_cond_signal(&estacao->embarque_concluido);
-    }
+    pthread_cond_signal(&estacao->embarque_concluido);
     pthread_mutex_unlock(&estacao->mutex);
 }

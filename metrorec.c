@@ -25,16 +25,17 @@ void estacao_preencher_vagao(struct estacao *estacao, int assentos) {
     printf("Vagão chegou à estação, com %d assentos livres\n", assentos);
     pthread_cond_broadcast(&estacao->vagao_disponivel);
     estacao->assentos_livres = assentos;
+    estacao->passageiros_embarcados = 0;
 
-    while (estacao->passageiros_embarcados != estacao->assentos_livres) {
+    while (estacao->assentos_livres > 0 && estacao->passageiros_embarcados < estacao->assentos_livres) {
         pthread_cond_wait(&estacao->embarque_concluido, &estacao->mutex);
     }
-
     estacao->assentos_livres = 0;
-    estacao->passageiros_embarcados = 0;
 
     pthread_mutex_unlock(&estacao->mutex);
 }
+
+
 
 void estacao_espera_pelo_vagao(struct estacao *estacao) {
     pthread_mutex_lock(&estacao->mutex);
