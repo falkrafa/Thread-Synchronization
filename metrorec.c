@@ -8,6 +8,7 @@ struct estacao {
     int assentos_livres;
     int passageiros_esperando;
     int passageiros_embarcados;
+    int passageiros_teste;
 };
 
 void estacao_init(struct estacao *estacao) {
@@ -17,19 +18,20 @@ void estacao_init(struct estacao *estacao) {
     estacao->assentos_livres = 0;
     estacao->passageiros_esperando = 0;
     estacao->passageiros_embarcados = 0;
-    printf("Estação inicializada.\n");
+    // printf("Estação inicializada.\n");
 }
 
 void estacao_preencher_vagao(struct estacao *estacao, int assentos) {
     pthread_mutex_lock(&estacao->mutex);
-    printf("Vagão chegou à estação, com %d assentos livres\n", assentos);
+    // printf("Vagão chegou à estação, com %d assentos livres\n", assentos);
     pthread_cond_broadcast(&estacao->vagao_disponivel);
     estacao->assentos_livres = assentos;
     estacao->passageiros_embarcados = 0;
 
-    while (estacao->assentos_livres > 0 && estacao->passageiros_embarcados < estacao->assentos_livres) {
-        pthread_cond_wait(&estacao->embarque_concluido, &estacao->mutex);
-    }
+    while (estacao->passageiros_esperando > 0 && estacao->assentos_livres > 0) {
+    pthread_cond_wait(&estacao->embarque_concluido, &estacao->mutex);
+}
+
     estacao->assentos_livres = 0;
 
     pthread_mutex_unlock(&estacao->mutex);
@@ -40,7 +42,7 @@ void estacao_preencher_vagao(struct estacao *estacao, int assentos) {
 void estacao_espera_pelo_vagao(struct estacao *estacao) {
     pthread_mutex_lock(&estacao->mutex);
 
-    printf("Passageiro %d criado.\n", estacao->passageiros_esperando);
+    // printf("Passageiro %d criado.\n", estacao->passageiros_esperando);
     estacao->passageiros_esperando++;
 
     while (estacao->assentos_livres == 0 || estacao->passageiros_embarcados >= estacao->assentos_livres) {
@@ -57,7 +59,8 @@ void estacao_espera_pelo_vagao(struct estacao *estacao) {
 
 void estacao_embarque(struct estacao *estacao) {
     pthread_mutex_lock(&estacao->mutex);
-    printf("Passageiro embarcando.\n");
+    // printf("Passageiro %d embarcando.\n", estacao->passageiros_teste);
+    // estacao->passageiros_teste++;
     pthread_cond_signal(&estacao->embarque_concluido);
     pthread_mutex_unlock(&estacao->mutex);
 }
