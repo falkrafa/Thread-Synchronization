@@ -82,9 +82,9 @@ int run_test(int numPassageiros, int maxAssentos) {
 
 
 int main(void){
-  for (int i = 0; i < 10; i++) {
+  for (int i = 0; i < 70; i++) {
     printf("[-] Teste %d\n", i);
-    int random = rand() % 2000 + 1;
+    int random = rand() % 1000 + 1;
     run_test(random,1000);
   }
 
