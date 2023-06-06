@@ -1,94 +1,186 @@
+// SPDX-License-Identifier: GPL-3.0
+/*
+ * This file tests the implementation in sync_car.c.
+ *
+ * Note that passing these tests doesn't guarantee that your code is correct
+ * or meets the specifications given, but hopefully it's at least pretty
+ * close.
+ */
+
 #include <stdio.h>
 #include <stdlib.h>
+#include <signal.h>
+#include <time.h>
 #include <unistd.h>
 #include <pthread.h>
 
 #include "metrorec.c"
-// #define maxAssentos
-int counter = 0;
 
-void *passageiros_thread(void *arg)
+volatile int threads_completed = 0;
+
+void *passenger_thread(void *arg)
 {
-  struct estacao *estacao = (struct estacao *) arg;
+	struct estacao *estacao = (struct estacao *) arg;
 	estacao_espera_pelo_vagao(estacao);
-
-   __atomic_fetch_add(&counter, 1, __ATOMIC_SEQ_CST);
-  
+	__sync_add_and_fetch(&threads_completed, 1);
 	return NULL;
 }
 
-struct vagao_args {
+struct load_car_args {
 	struct estacao *estacao;
-	int assentos_livres;
+	int free_seats;
 };
 
-void *vagao_thread(void *args)
+volatile int load_car_returned = 0;
+
+void *load_car_thread(void *args)
 {
-	struct vagao_args *vargs = (struct vagao_args *) args;
-	estacao_preencher_vagao(vargs->estacao, vargs->assentos_livres);
+	struct load_car_args *ltargs = (struct load_car_args *) args;
+	estacao_preencher_vagao(ltargs->estacao, ltargs->free_seats);
+	load_car_returned = 1;
 	return NULL;
 }
 
-int run_test(int numPassageiros, int maxAssentos) {
-    struct estacao estacao;
-    estacao_init(&estacao);
-    int passageiro = numPassageiros;
-    pthread_t passageiros[numPassageiros];
+const char *alarm_error_str;
+int alarm_timeout;
 
-    for (int i = 0; i < numPassageiros; i++) {
-        pthread_create(&passageiros[i], NULL, (void *)passageiros_thread, (void *)&estacao);
-    }
-    sleep(1);
-
-    while (passageiro > 0) {
-        int assentos = rand() % maxAssentos + 1;  // gerar número aleatório de assentos
-        printf("[-] Numero %d Passageiros\n", passageiro);
-        printf("[-] Numero %d Assentos\n", assentos);
-
-
-        if (assentos == 0) {
-          assentos++;
-        }
-        struct vagao_args vargs = {&estacao, assentos};
-
-        pthread_t vagao;
-        pthread_create(&vagao, NULL, (void *)vagao_thread, (void *)&vargs);
-
-        int reap = (passageiro < assentos) ? passageiro : assentos;
-        while (reap != 0) {
-            if (counter > 0) {
-                estacao_embarque(&estacao);
-                __atomic_fetch_add(&counter, -1, __ATOMIC_SEQ_CST);
-                passageiro--;
-                assentos--;
-                reap--;
-            }
-        }
-        if (counter != 0) {
-            printf("%d\n", counter);
-            printf("Deu Ruim irmão, tente novamente.\n");
-            exit(0);
-        } 
-
-        
-
-        printf("[+] Vagão saiu da estação com %d assentos - Sobrou %d Passageiros\n", assentos, passageiro);
-    }
-    printf("\n=====================================\n");
-    printf("Estação finalizada\n");
-    sleep(1);
-    return 0;
+void _alarm(int seconds, const char *error_str)
+{
+	alarm_timeout = seconds;
+	alarm_error_str = error_str;
+	alarm(seconds);
 }
 
+void alarm_handler(int foo)
+{
+	fprintf(stderr, "Error: Failed to complete after %d seconds. Something's "
+                    "wrong, or your system is terribly slow. Possible error hint: [%s]\n",
+            alarm_timeout, alarm_error_str);
+	exit(1);
+}
 
-int main(void){
-  for (int i = 0; i < 70; i++) {
-    printf("[-] Teste %d\n", i);
-    int random = rand() % 1000 + 1;
-    run_test(random,1000);
-  }
+#ifndef MIN
+#define MIN(_x, _y) ((_x) < (_y)) ? (_x) : (_y)
+#endif
 
-  printf("\n[-]=====================================[-]\n");
-  printf("Finalizou\n");
+int main(void)
+{
+	struct estacao estacao;
+	estacao_init(&estacao);
 
+	int retorno;
+
+	srandom(getpid() ^ time(NULL));
+
+	signal(SIGALRM, alarm_handler);
+
+        // Make sure estacao_preencher_vagao() returns immediately if no waiting passengers.
+	_alarm(1, "estacao_preencher_vagao() did not return immediately when no waiting passengers");
+	estacao_preencher_vagao(&estacao, 0);
+	estacao_preencher_vagao(&estacao, 10);
+	_alarm(0, NULL);
+
+        // Create a bunch of 'passengers', each in their own thread.
+	int i;
+	const int total_passengers = 100;
+	int passengers_left = total_passengers;
+	for (i = 0; i < total_passengers; i++) {
+		pthread_t tid;
+		int ret = pthread_create(&tid, NULL, passenger_thread, &estacao);
+		if (ret != 0) {
+                        // If this fails, perhaps we exceeded some system limit.
+			// Try reducing 'total_passengers'.
+			perror("pthread_create");
+			exit(1);
+		}
+	}
+
+        // Make sure estacao_preencher_vagao() returns immediately if no free seats.
+	_alarm(2, "estacao_preencher_vagao didn't return immediately when no free seats");
+	estacao_preencher_vagao(&estacao, 0);
+	_alarm(0, NULL);
+
+	int total_passengers_boarded = 0;
+	const int max_free_seats_per_car = 50;
+	int pass = 0;
+	while (passengers_left > 0) {
+		_alarm(2, "Some more complicated issue appears to have caused passengers "
+			"not to board when given the opportunity");
+
+		int free_seats = random() % max_free_seats_per_car;
+
+		printf("car entering station with %d free seats\n", free_seats);
+		load_car_returned = 0;
+		struct load_car_args args = {&estacao, free_seats};
+		pthread_t lt_tid;
+		int ret = pthread_create(&lt_tid, NULL, load_car_thread, &args);
+
+		if (ret != 0) {
+			perror("pthread_create");
+			exit(1);
+		}
+
+		int threads_to_reap = MIN(passengers_left, free_seats);
+		int threads_reaped = 0;
+
+		while (threads_reaped < threads_to_reap) {
+			if (load_car_returned) {
+				fprintf(stderr, "Error: estacao_preencher_vagao ");
+				fprintf(stderr, "returned early!\n");
+				exit(1);
+			}
+			if (threads_completed > 0) {
+				if ((pass % 2) == 0)
+					usleep(random() % 2);
+				threads_reaped++;
+				estacao_embarque(&estacao);
+				__sync_sub_and_fetch(&threads_completed, 1);
+			}
+		}
+
+                // Wait a little bit longer. Give estacao_preencher_vagao() a chance to return
+		// and ensure that no additional passengers board the train. One second
+		// should be tons of time, but if you're on a horribly overloaded system,
+		// this may need to be tweaked.
+		for (i = 0; i < 1000; i++) {
+			if (i > 50 && load_car_returned)
+				break;
+			usleep(1000);
+		}
+
+		if (!load_car_returned) {
+			fprintf(stderr, "Error: estacao_preencher_vagao failed\n");
+			exit(1);
+		}
+
+		while (threads_completed > 0) {
+			threads_reaped++;
+			__sync_sub_and_fetch(&threads_completed, 1);
+		}
+
+		passengers_left -= threads_reaped;
+		total_passengers_boarded += threads_reaped;
+		printf("car departed station with %d new passenger(s) ",
+		       threads_reaped);
+		printf("(expected %d)%s\n", threads_to_reap,
+		       (threads_to_reap != threads_reaped) ? " *****" : "");
+
+		if (threads_to_reap != threads_reaped) {
+			fprintf(stderr, "Error: Many passengers on this car\n");
+			exit(1);
+		}
+		pass++;
+	}
+
+	if (total_passengers_boarded == total_passengers) {
+		printf("Looks good!\n");
+		retorno = 0;
+	} else {
+		fprintf(stderr, "Error: expected %d total boarded passengers, "
+			, total_passengers);
+		fprintf(stderr, "but got %d!\n", total_passengers_boarded);
+
+		retorno = 1;
+	}
+	return retorno;
 }

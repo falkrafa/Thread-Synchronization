@@ -1,5 +1,4 @@
 #include <pthread.h>
-#include <stdio.h>
 
 struct estacao {
     pthread_mutex_t mutex;
@@ -8,6 +7,7 @@ struct estacao {
     int assentos_livres;
     int passageiros_esperando;
     int passageiros_embarcados;
+    int passageiros_controle;
 };
 
 void estacao_init(struct estacao *estacao) {
@@ -22,9 +22,14 @@ void estacao_init(struct estacao *estacao) {
 void estacao_preencher_vagao(struct estacao *estacao, int assentos) {
     pthread_mutex_lock(&estacao->mutex);
     estacao->assentos_livres = assentos;
-    estacao->passageiros_embarcados = 0;
+    if(estacao->passageiros_esperando < estacao->assentos_livres){
+        estacao->passageiros_embarcados = estacao->passageiros_esperando;
+    }
+    else{
+        estacao->passageiros_embarcados = estacao->assentos_livres;
+    }
     pthread_cond_broadcast(&estacao->vagao_disponivel);
-    if (estacao->passageiros_esperando > 0) {
+    while (estacao->passageiros_esperando > 0 && estacao->assentos_livres > 0) {
         pthread_cond_wait(&estacao->embarque_concluido, &estacao->mutex);
     }
     pthread_mutex_unlock(&estacao->mutex);
@@ -33,16 +38,17 @@ void estacao_preencher_vagao(struct estacao *estacao, int assentos) {
 void estacao_espera_pelo_vagao(struct estacao *estacao) {
     pthread_mutex_lock(&estacao->mutex);
     estacao->passageiros_esperando++;
-    while (estacao->assentos_livres == 0 || estacao->passageiros_embarcados >= estacao->assentos_livres) {
+    while (estacao->assentos_livres == 0 || estacao->passageiros_embarcados == 0) {
         pthread_cond_wait(&estacao->vagao_disponivel, &estacao->mutex);
     }
-    estacao->passageiros_esperando--;
-    estacao->passageiros_embarcados++;
+    estacao->passageiros_embarcados--;
     pthread_mutex_unlock(&estacao->mutex);
 }
 
 void estacao_embarque(struct estacao *estacao) {
     pthread_mutex_lock(&estacao->mutex);
     pthread_cond_signal(&estacao->embarque_concluido);
+    estacao->passageiros_esperando--;
+    estacao->assentos_livres--;
     pthread_mutex_unlock(&estacao->mutex);
 }
