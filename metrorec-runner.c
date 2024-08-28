@@ -1,12 +1,3 @@
-// SPDX-License-Identifier: GPL-3.0
-/*
- * This file tests the implementation in sync_car.c.
- *
- * Note that passing these tests doesn't guarantee that your code is correct
- * or meets the specifications given, but hopefully it's at least pretty
- * close.
- */
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <signal.h>
@@ -74,13 +65,11 @@ int main(void)
 
 	signal(SIGALRM, alarm_handler);
 
-        // Make sure estacao_preencher_vagao() returns immediately if no waiting passengers.
 	_alarm(1, "estacao_preencher_vagao() did not return immediately when no waiting passengers");
 	estacao_preencher_vagao(&estacao, 0);
 	estacao_preencher_vagao(&estacao, 10);
 	_alarm(0, NULL);
 
-        // Create a bunch of 'passengers', each in their own thread.
 	int i;
 	const int total_passengers = 100;
 	int passengers_left = total_passengers;
@@ -88,14 +77,11 @@ int main(void)
 		pthread_t tid;
 		int ret = pthread_create(&tid, NULL, passenger_thread, &estacao);
 		if (ret != 0) {
-                        // If this fails, perhaps we exceeded some system limit.
-			// Try reducing 'total_passengers'.
 			perror("pthread_create");
 			exit(1);
 		}
 	}
 
-        // Make sure estacao_preencher_vagao() returns immediately if no free seats.
 	_alarm(2, "estacao_preencher_vagao didn't return immediately when no free seats");
 	estacao_preencher_vagao(&estacao, 0);
 	_alarm(0, NULL);
@@ -137,11 +123,7 @@ int main(void)
 				__sync_sub_and_fetch(&threads_completed, 1);
 			}
 		}
-
-                // Wait a little bit longer. Give estacao_preencher_vagao() a chance to return
-		// and ensure that no additional passengers board the train. One second
-		// should be tons of time, but if you're on a horribly overloaded system,
-		// this may need to be tweaked.
+		
 		for (i = 0; i < 1000; i++) {
 			if (i > 50 && load_car_returned)
 				break;
